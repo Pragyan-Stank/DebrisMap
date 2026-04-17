@@ -6,17 +6,16 @@ import { HeatmapLayer } from '@deck.gl/aggregation-layers';
 import { Map } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { getVisualizationData, predictDebris, fetchPatchInference } from '../services/api';
-import { Upload, Target } from 'lucide-react';
+import { Upload, Target, Info, Activity, Layers, Map as MapIcon, ChevronRight } from 'lucide-react';
 
 const INITIAL_VIEW_STATE = {
-  longitude: -122.4194,
-  latitude: 37.7749,
+  longitude: -86.33591,
+  latitude: 15.92308,
   zoom: 11,
-  pitch: 40,
+  pitch: 30,
   bearing: 0
 };
 
-// Using ESRI World Imagery pure satellite base map
 const MAP_STYLE = {
   version: 8,
   sources: {
@@ -30,18 +29,8 @@ const MAP_STYLE = {
     }
   },
   layers: [
-    {
-      id: "background",
-      type: "background",
-      paint: { "background-color": "#021019" }
-    },
-    {
-      id: "satellite-layer",
-      type: "raster",
-      source: "satellite",
-      minzoom: 0,
-      maxzoom: 19
-    }
+    { id: "background", type: "background", paint: { "background-color": "#020810" } },
+    { id: "satellite-layer", type: "raster", source: "satellite", minzoom: 0, maxzoom: 19 }
   ]
 };
 
@@ -62,14 +51,12 @@ const Visualization = () => {
     }
     
     setPatchLoading(true);
-    // Construct true standard geographic array boundaries
     const lonMin = Math.min(draftBBox.start[0], draftBBox.end[0]);
     const lonMax = Math.max(draftBBox.start[0], draftBBox.end[0]);
     const latMin = Math.min(draftBBox.start[1], draftBBox.end[1]);
     const latMax = Math.max(draftBBox.start[1], draftBBox.end[1]);
     
     const bbox = [lonMin, latMin, lonMax, latMax];
-    
     const centerLon = (lonMin + lonMax) / 2;
     const centerLat = (latMin + latMax) / 2;
     
@@ -89,40 +76,9 @@ const Visualization = () => {
              transitionDuration: 2500,
              transitionInterpolator: new FlyToInterpolator()
            }));
-       } else {
-           alert(`Live Inference Complete: No Debris detected in the last ${dateRange.replace("last_", "").replace("_", " ")} around this custom tracking patch!`);
        }
-    } else {
-       alert("Live Patch Inference failed to connect to Sentinel Hub Simulation.");
     }
   };
-
-  const loadData = async () => {
-    const res = await getVisualizationData();
-    if (res && res.points) {
-      setData(res.points);
-      
-      // Auto center map on first point if available
-      if (res.points.length > 0) {
-        setViewState(v => ({
-          ...v,
-          longitude: res.points[0].lon,
-          latitude: res.points[0].lat
-        }));
-      }
-    }
-  };
-
-  useEffect(() => {
-    loadData();
-    
-    // Auto-refresh every 5 seconds to simulate real-time
-    const interval = setInterval(() => {
-      loadData();
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, []);
 
   const handleFileUpload = async (event) => {
     const file = event.target.files[0];
@@ -143,11 +99,7 @@ const Visualization = () => {
            transitionDuration: 3000,
            transitionInterpolator: new FlyToInterpolator()
          }));
-      } else {
-         alert("Inference Complete: No Marine Plastics / Debris were detected in this image!");
       }
-    } else {
-       alert("Error processing the image or connecting to the local U-Net framework.");
     }
   };
 
@@ -172,7 +124,7 @@ const Visualization = () => {
       }] : [],
       getPolygon: d => d.polygon,
       getFillColor: [0, 120, 255, 60],
-      getLineColor: [0, 80, 255, 255],
+      getLineColor: [0, 242, 255, 255],
       lineWidthMinPixels: 2,
       stroked: true,
       filled: true
@@ -182,7 +134,7 @@ const Visualization = () => {
       data,
       getPosition: d => [d.lon, d.lat],
       getWeight: d => d.probability,
-      radiusPixels: 25,
+      radiusPixels: 40,
       intensity: 3,
       threshold: 0.05
     }),
@@ -190,82 +142,111 @@ const Visualization = () => {
       id: 'scatterplot-layer',
       data,
       getPosition: d => [d.lon, d.lat],
-      getFillColor: d => [255, 200, 0, 200], // Yellow for points
-      getRadius: d => 50,
+      getFillColor: [0, 242, 255, 200],
+      getRadius: 30,
       radiusMinPixels: 2,
-      radiusMaxPixels: 10,
     }),
     new ScatterplotLayer({
       id: 'cluster-layer',
       data: clusters,
       getPosition: d => d.center,
-      getFillColor: [0, 255, 200, 150],
-      getLineColor: [0, 255, 200, 255],
+      getFillColor: [255, 0, 100, 150],
+      getLineColor: [255, 0, 100, 255],
       lineWidthMinPixels: 2,
       stroked: true,
-      getRadius: d => Math.max(90, d.density * 6), // Scale circle dynamically to debris density
+      getRadius: d => Math.max(100, d.density * 5),
     })
   ];
 
   return (
     <div className="vis-container">
-      <div className="vis-header">
-        <div>
-          <h2>Marine Plastic Hotspots</h2>
-          <p>Real-time detection overlay (Heatmap + Points)</p>
+      <aside className="sidebar glass">
+        <div style={{marginTop: '20px'}}>
+            <h2 style={{fontFamily: 'Outfit', color: '#fff', fontSize: '1.2rem'}}>Intelligence Hub</h2>
+            <p style={{color: '#94a3b8', fontSize: '0.8rem', marginTop: '5px'}}>Live Regional Detection & Spectral Analytics</p>
         </div>
-        
-        <div className="vis-controls" style={{ display: 'flex', gap: '20px', alignItems: 'center', flexWrap: 'wrap' }}>
-          
-          <div className="patch-controls" style={{ display: 'flex', gap: '8px', background: 'rgba(0,0,0,0.5)', padding: '10px', borderRadius: '8px', border: '1px solid #333' }}>
-            <div style={{color: '#aaa', fontSize: '13px', alignSelf: 'center', marginRight: '5px'}}>
-               <Target size={14} style={{verticalAlign: 'text-bottom', marginRight: '4px'}}/>
-               Live Region Focus
+
+        <div className="control-card">
+            <div className="card-title"><Target size={18}/> Regional Scan</div>
+            <p style={{fontSize: '0.75rem', color: '#94a3b8', marginBottom: '15px'}}>Click below then drag on map to select a custom Sentinel-2 swath.</p>
+            <button 
+                className={`btn ${isDrawing ? 'btn-danger' : 'btn-glow'}`} 
+                onClick={() => setIsDrawing(!isDrawing)}
+                style={{width: '100%', justifyContent: 'center', backgroundColor: isDrawing ? '#ef4444' : ''}}
+            >
+                {isDrawing ? 'Cancel Tracking' : 'Define Target Area'}
+            </button>
+            
+            {draftBBox && (
+                <div style={{marginTop: '15px'}}>
+                    <div className="input-group">
+                        <span className="input-label">Temporal Window</span>
+                        <select value={dateRange} onChange={e => setDateRange(e.target.value)}>
+                            <option value="last_1_day">Current Orbit</option>
+                            <option value="last_3_days">Last 72 Hours</option>
+                            <option value="last_5_days">Last 5 Orbits</option>
+                        </select>
+                    </div>
+                    <button className="btn btn-glow" onClick={handleRunPatchInference} disabled={patchLoading} style={{width: '100%', justifyContent: 'center'}}>
+                        {patchLoading ? 'Analyzing Spectral Data...' : 'Execute Neural Scan'}
+                    </button>
+                </div>
+            )}
+        </div>
+
+        <div className="control-card">
+            <div className="card-title"><Upload size={18}/> Direct Ingestion</div>
+            <p style={{fontSize: '0.75rem', color: '#94a3b8', marginBottom: '15px'}}>Upload localized .TIF patches for high-res deep learning validation.</p>
+            <div style={{position: 'relative', overflow: 'hidden', display: 'inline-block', width: '100%'}}>
+                <button className="btn glass" style={{width: '100%', justifyContent: 'center', borderColor: 'rgba(255,255,255,0.2)', pointerEvents: 'none'}}>
+                    {loading ? 'Processing Raster...' : 'Browse Local Files'}
+                </button>
+                <input 
+                    type="file" 
+                    accept=".tif,.tiff" 
+                    onChange={handleFileUpload} 
+                    disabled={loading}
+                    style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        height: '100%',
+                        opacity: 0,
+                        cursor: 'pointer',
+                        zIndex: 10
+                    }}
+                />
             </div>
-            <button className="btn-primary" onClick={() => { setIsDrawing(!isDrawing); }} style={{background: isDrawing ? '#ff4444' : '#666', border: '1px solid #444'}}>
-               {isDrawing ? 'Cancel Drawing' : 'Draw Patch Area'}
-            </button>
-            <select value={dateRange} onChange={e => setDateRange(e.target.value)} style={{background: '#111', color: 'white', border: '1px solid #444', borderRadius: '4px', padding: '4px 8px'}}>
-               <option value="last_1_day">Last 24 Hours</option>
-               <option value="last_3_days">Last 3 Days</option>
-               <option value="last_5_days">Last 5 Days</option>
-            </select>
-            <button className="btn-primary" onClick={handleRunPatchInference} disabled={patchLoading || loading || !draftBBox} style={{background: !draftBBox ? '#444' : '#0066cc'}}>
-               {patchLoading ? 'Scanning...' : 'Run Regional Detection'}
-            </button>
-          </div>
-
-          <div className="upload-button-wrapper">
-            <button className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#3D9970' }}>
-              <Upload size={18} />
-              {loading ? 'Processing...' : 'Upload .TIF Directly'}
-            </button>
-            <input 
-              type="file" 
-              accept=".tif,.tiff,.jpg,.jpeg,.png"
-              onChange={handleFileUpload} 
-              disabled={loading || patchLoading}
-            />
-          </div>
         </div>
-      </div>
 
-      <div className="map-container">
+        <div className="control-card" style={{marginTop: 'auto'}}>
+            <div className="card-title"><Activity size={18}/> System Status</div>
+            <div style={{display: 'flex', flexDirection: 'column', gap: '8px'}}>
+                <div style={{display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem'}}>
+                    <span style={{color: '#94a3b8'}}>U-Net Model</span>
+                    <span style={{color: '#10b981'}}>Active</span>
+                </div>
+                <div style={{display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem'}}>
+                    <span style={{color: '#94a3b8'}}>FDI Compute</span>
+                    <span style={{color: '#10b981'}}>Ready</span>
+                </div>
+                <div style={{display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem'}}>
+                    <span style={{color: '#94a3b8'}}>Lat/Lon Transformation</span>
+                    <span style={{color: '#10b981'}}>Locked</span>
+                </div>
+            </div>
+        </div>
+      </aside>
+
+      <main className="map-viewport">
         <DeckGL
           initialViewState={viewState}
           controller={{dragPan: !isDrawing}}
           layers={layers}
           onViewStateChange={({viewState}) => setViewState(viewState)}
-          onDragStart={(info) => {
-             if (isDrawing && info.coordinate) {
-                setDraftBBox({ start: info.coordinate, end: info.coordinate });
-             }
-          }}
-          onDrag={(info) => {
-             if (isDrawing && draftBBox && info.coordinate) {
-                setDraftBBox(prev => ({ ...prev, end: info.coordinate }));
-             }
-          }}
+          onDragStart={(info) => isDrawing && info.coordinate && setDraftBBox({ start: info.coordinate, end: info.coordinate })}
+          onDrag={(info) => isDrawing && draftBBox && info.coordinate && setDraftBBox(prev => ({ ...prev, end: info.coordinate }))}
           onDragEnd={(info) => {
              if (isDrawing && draftBBox && info.coordinate) {
                 setDraftBBox(prev => ({ ...prev, end: info.coordinate }));
@@ -281,26 +262,24 @@ const Visualization = () => {
         >
           <Map mapStyle={MAP_STYLE} />
         </DeckGL>
-      </div>
 
-      {isDrawing && (
-        <div style={{
-          position: 'absolute', 
-          bottom: '20px', 
-          left: '50%', 
-          transform: 'translateX(-50%)',
-          background: 'rgba(0,100,255,0.9)', 
-          color: 'white', 
-          padding: '10px 20px', 
-          borderRadius: '30px',
-          zIndex: 1000,
-          boxShadow: '0 4px 15px rgba(0,0,0,0.5)',
-          pointerEvents: 'none',
-          fontWeight: 'bold'
-        }}>
-          DRAG MOUSE TO DRAW TARGET PATCH
+        <div className="vis-stats glass">
+            <div className="stat-item">
+                <div className="stat-value">{data.length}</div>
+                <div className="stat-label">Detected Hotspots</div>
+            </div>
+            <div className="stat-item">
+                <div className="stat-value">{clusters.length}</div>
+                <div className="stat-label">Active Clusters</div>
+            </div>
         </div>
-      )}
+
+        {isDrawing && (
+          <div className="draw-instruction">
+            DRAG TO DEFINE SEARCH BBOX
+          </div>
+        )}
+      </main>
     </div>
   );
 };
