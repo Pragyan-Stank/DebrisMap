@@ -17,6 +17,7 @@ function App() {
             <Route path="/visualization" element={<Visualization />} />
             <Route path="/trajectory" element={<Trajectory />} />
             <Route path="/cleanup" element={<Cleanup />} />
+            <Route path="*" element={<Home />} />
           </Routes>
         </main>
       </div>

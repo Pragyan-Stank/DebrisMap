@@ -59,8 +59,8 @@ const Home = () => {
       {/* ── Hero ──────────────────────────────────────── */}
       <section className="hero" style={{ height: '100vh' }}>
         <video autoPlay muted loop playsInline className="hero-img-bg"
-          style={{ filter: 'brightness(0.25) saturate(1.3)' }}>
-          <source src="https://assets.mixkit.co/videos/preview/mixkit-top-vantage-point-of-the-ocean-from-the-beach-2479-large.mp4" type="video/mp4" />
+          style={{ opacity: 0.6, pointerEvents: 'none' }}>
+          <source src="/hero_bg.mp4" type="video/mp4" />
         </video>
         <div className="hero-overlay"></div>
 

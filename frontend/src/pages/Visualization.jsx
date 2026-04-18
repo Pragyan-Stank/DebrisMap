@@ -7,6 +7,7 @@ import { Map } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { getVisualizationData, predictDebris, fetchPatchInference } from '../services/api';
 import { Upload, Target, Activity, Download, Clock, BarChart3, MapPin, AlertTriangle, Crosshair, Trash2, Eye, EyeOff, Radio } from 'lucide-react';
+import TerminalLoader from '../components/TerminalLoader';
 
 const INITIAL_VIEW_STATE = {
   longitude: -86.33591,
@@ -77,6 +78,10 @@ const Visualization = () => {
     const bbox = [lonMin, latMin, lonMax, latMax];
     const centerLon = (lonMin + lonMax) / 2;
     const centerLat = (latMin + latMax) / 2;
+    const widthKm = Math.abs(lonMax - lonMin) * 111.32 * Math.cos(centerLat * Math.PI / 180);
+    const heightKm = Math.abs(latMax - latMin) * 111.32;
+    const areaSqKm = (widthKm * heightKm).toFixed(2);
+    
     const startTime = Date.now();
     
     const result = await fetchPatchInference(bbox, 10, dateRange); 
@@ -267,24 +272,46 @@ const Visualization = () => {
             
             {draftBBox && (
                 <div style={{marginTop: '15px'}}>
-                    <div style={{fontSize:'0.7rem',color:'#64748b',marginBottom:'8px',fontFamily:'monospace',background:'#0a1016',padding:'6px 8px',borderRadius:'6px'}}>
-                      SW: {Math.min(draftBBox.start[1],draftBBox.end[1]).toFixed(4)}°, {Math.min(draftBBox.start[0],draftBBox.end[0]).toFixed(4)}°<br/>
-                      NE: {Math.max(draftBBox.start[1],draftBBox.end[1]).toFixed(4)}°, {Math.max(draftBBox.start[0],draftBBox.end[0]).toFixed(4)}°
-                    </div>
-                    <div className="input-group">
-                        <span className="input-label">Temporal Window</span>
-                        <select value={dateRange} onChange={e => setDateRange(e.target.value)}>
-                            <option value="last_1_day">Current Orbit</option>
-                            <option value="last_3_days">Last 72 Hours</option>
-                            <option value="last_5_days">Last 5 Orbits</option>
-                        </select>
-                    </div>
-                    <button className="btn btn-glow" onClick={handleRunPatchInference} disabled={patchLoading} style={{width: '100%', justifyContent: 'center'}}>
-                        {patchLoading ? 'Analyzing Spectral Data...' : 'Execute Neural Scan'}
-                    </button>
-                    <button className="btn glass" onClick={() => {setDraftBBox(null); setData([]); setClusters([]);}} style={{width:'100%',justifyContent:'center',marginTop:'8px',borderColor:'rgba(255,255,255,0.1)', color:'#94a3b8', fontSize:'0.8rem'}}>
-                        <Trash2 size={14}/> Clear Selection
-                    </button>
+                    {patchLoading ? (
+                        <TerminalLoader mode="visualization" height="150px" />
+                    ) : (
+                        <>
+                            <div style={{
+                              fontSize:'0.7rem', color:'#64748b', marginBottom:'8px', fontFamily:'monospace', 
+                              background:'#0a1016', padding:'6px 8px', borderRadius:'6px', display: 'flex', flexDirection: 'column', gap: '4px'
+                            }}>
+                              <div>SW: {Math.min(draftBBox.start[1],draftBBox.end[1]).toFixed(4)}°, {Math.min(draftBBox.start[0],draftBBox.end[0]).toFixed(4)}°</div>
+                              <div>NE: {Math.max(draftBBox.start[1],draftBBox.end[1]).toFixed(4)}°, {Math.max(draftBBox.start[0],draftBBox.end[0]).toFixed(4)}°</div>
+                              <div style={{ 
+                                color: '#00f2ff', 
+                                borderTop: '1px solid rgba(0, 242, 255, 0.2)', 
+                                paddingTop: '4px', 
+                                marginTop: '2px',
+                                fontWeight: 600
+                              }}>
+                                Area: ~{(
+                                  Math.abs(draftBBox.end[0] - draftBBox.start[0]) * 111.32 * Math.cos(((draftBBox.start[1] + draftBBox.end[1]) / 2) * Math.PI / 180) * 
+                                  Math.abs(draftBBox.end[1] - draftBBox.start[1]) * 111.32
+                                ).toFixed(2)} sq. km
+                              </div>
+                            </div>
+                            
+                            <div className="input-group">
+                                <span className="input-label">Temporal Window</span>
+                                <select value={dateRange} onChange={e => setDateRange(e.target.value)}>
+                                    <option value="last_1_day">Current Orbit</option>
+                                    <option value="last_3_days">Last 72 Hours</option>
+                                    <option value="last_5_days">Last 5 Orbits</option>
+                                </select>
+                            </div>
+                            <button className="btn btn-glow" onClick={handleRunPatchInference} style={{width: '100%', justifyContent: 'center'}}>
+                                Execute Neural Scan
+                            </button>
+                            <button className="btn glass" onClick={() => {setDraftBBox(null); setData([]); setClusters([]);}} style={{width:'100%',justifyContent:'center',marginTop:'8px',borderColor:'rgba(255,255,255,0.1)', color:'#94a3b8', fontSize:'0.8rem'}}>
+                                <Trash2 size={14}/> Clear Selection
+                            </button>
+                        </>
+                    )}
                 </div>
             )}
         </div>
@@ -292,19 +319,19 @@ const Visualization = () => {
         {/* Upload Card */}
         <div className="control-card">
             <div className="card-title"><Upload size={18}/> Direct Ingestion</div>
-            <div className={`upload-zone ${loading ? 'active' : ''}`}>
-                <input type="file" accept=".tif,.tiff" onChange={handleFileUpload} disabled={loading} />
-                <div className="upload-zone-icon">
-                  {loading ? <div className="spin"><Activity size={18} color="#00f2ff" /></div> : <Upload size={18} color="#00f2ff" />}
+            {loading ? (
+                <TerminalLoader mode="visualization" height="130px" />
+            ) : (
+                <div className="upload-zone">
+                    <input type="file" accept=".tif,.tiff" onChange={handleFileUpload} disabled={loading} />
+                    <div className="upload-zone-icon">
+                      <Upload size={18} color="#00f2ff" />
+                    </div>
+                    <div className="upload-zone-text">
+                        <><strong>Drop .TIF here</strong> or click to browse<br/><span style={{fontSize:'0.7rem'}}>MARIDA GeoTIFF • 11-band Sentinel-2</span></>
+                    </div>
                 </div>
-                <div className="upload-zone-text">
-                  {loading ? (
-                    <><strong>Processing satellite raster...</strong><br/>Running U-Net inference</>
-                  ) : (
-                    <><strong>Drop .TIF here</strong> or click to browse<br/><span style={{fontSize:'0.7rem'}}>MARIDA GeoTIFF • 11-band Sentinel-2</span></>
-                  )}
-                </div>
-            </div>
+            )}
         </div>
 
         {/* Detection Analytics Card */}
