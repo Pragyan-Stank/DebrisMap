@@ -4,6 +4,7 @@ import Navbar from './components/Navbar';
 import Home from './pages/Home';
 import Visualization from './pages/Visualization';
 import Trajectory from './pages/Trajectory';
+import Cleanup from './pages/Cleanup';
 
 function App() {
   return (
@@ -15,6 +16,7 @@ function App() {
             <Route path="/" element={<Home />} />
             <Route path="/visualization" element={<Visualization />} />
             <Route path="/trajectory" element={<Trajectory />} />
+            <Route path="/cleanup" element={<Cleanup />} />
           </Routes>
         </main>
       </div>

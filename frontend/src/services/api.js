@@ -76,3 +76,23 @@ export const fetchWeather = async (lat, lon) => {
     return null;
   }
 };
+
+export const fetchCleanupHotspots = async (hours = 72) => {
+  try {
+    const response = await axios.get(`${API_URL}/cleanup-hotspots`, { params: { hours } });
+    return response.data;
+  } catch (error) {
+    console.error("Error fetching cleanup hotspots:", error);
+    return null;
+  }
+};
+
+export const fetchDetectionHistory = async () => {
+  try {
+    const response = await axios.get(`${API_URL}/detection-history`);
+    return response.data;
+  } catch (error) {
+    console.error("Error fetching detection history:", error);
+    return null;
+  }
+};

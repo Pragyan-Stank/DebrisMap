@@ -10,6 +10,7 @@ from app.services.sentinel_service import fetch_sentinel2_patch
 from app.services.patch_inference_service import process_live_patch
 from app.services.clustering_service import compute_clusters
 from app.services.trajectory_service import predict_trajectory_for_point, predict_trajectories_for_clusters
+from app.services.detection_store import record_detections, get_history_summary
 
 router = APIRouter()
 
@@ -57,6 +58,9 @@ async def predict_debris(file: UploadFile = File(...)):
         # Compute clusters for the response
         clusters = compute_clusters(results)
         
+        # Record in detection history for Clean-Up Programme
+        record_detections(results, clusters, source="upload", metadata={"filename": file.filename})
+        
         return PredictionResponse(
             status="success",
             message="Real Inference completed successfully.",
@@ -91,6 +95,9 @@ async def live_patch_inference(request: PatchInferenceRequest):
         # 3. Group the individual pixels into macro clusters utilizing DBSCAN
         clusters = compute_clusters(points)
         live_hotspots = points
+        
+        # Record in detection history for Clean-Up Programme
+        record_detections(points, clusters, source="patch_inference", metadata={"bounds": request.bbox, "date_range": request.date_range})
         
         return PredictionResponse(
             status="success",
@@ -169,3 +176,22 @@ async def get_weather(lat: float, lon: float):
     except Exception as e:
         print(f"Weather fetch error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Clean-Up Programme Endpoints ──────────────────────────────────
+
+@router.get("/cleanup-hotspots")
+async def get_cleanup_hotspots(hours: float = 72):
+    """Returns aggregated cleanup intelligence from stored detection history."""
+    from app.services.cleanup_service import build_cleanup_intelligence
+    try:
+        return build_cleanup_intelligence(max_age_hours=hours)
+    except Exception as e:
+        print(f"Cleanup hotspots error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/detection-history")
+async def get_detection_history():
+    """Returns summary of the detection store."""
+    return get_history_summary()

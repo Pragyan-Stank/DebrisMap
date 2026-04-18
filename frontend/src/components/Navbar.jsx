@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Waves, BarChart2, Navigation } from 'lucide-react';
+import { Waves, BarChart2, Navigation, Trash2 } from 'lucide-react';
 
 const Navbar = () => {
   const [scrolled, setScrolled] = useState(false);
@@ -36,6 +36,12 @@ const Navbar = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Navigation size={16} />
             Drift Forecast
+          </div>
+        </Link>
+        <Link to="/cleanup" className={`nav-link ${location.pathname === '/cleanup' ? 'active' : ''}`}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Trash2 size={16} />
+            Clean-Up
           </div>
         </Link>
       </div>
