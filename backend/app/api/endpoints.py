@@ -83,26 +83,29 @@ async def predict_debris(file: UploadFile = File(...)):
             from pyproj import Transformer as ProjTransformer
             transformer = ProjTransformer.from_crs(crs, "EPSG:4326", always_xy=True)
         
-        # Sample pixels (cap at 15000 for payload size)
-        step = max(1, (H * W) // 15000)
+        # Sample pixels uniformly via 2D grid (cap at ~15000)
+        import math
+        target_pts = 15000
+        total_pts = H * W
+        stride = max(1, int(math.sqrt(total_pts / target_pts)))
+        
         seg_pixels = []
-        for flat_idx in range(0, H * W, step):
-            y = flat_idx // W
-            x = flat_idx % W
-            c_id = int(class_map[y, x])
-            # Scale to original raster size for geo lookup
-            orig_x = int(x / W * orig_W)
-            orig_y = int(y / H * orig_H)
-            xc, yc = transform * (orig_x, orig_y)
-            if transformer:
-                lon, lat = transformer.transform(xc, yc)
-            else:
-                lon, lat = xc, yc
-            seg_pixels.append({
-                "lat": float(lat), "lon": float(lon),
-                "class_id": c_id,
-                "class_name": CLASS_NAMES.get(c_id, "Unknown")
-            })
+        for y in range(0, H, stride):
+            for x in range(0, W, stride):
+                c_id = int(class_map[y, x])
+                # Scale to original raster size for geo lookup
+                orig_x = int(x / W * orig_W)
+                orig_y = int(y / H * orig_H)
+                xc, yc = transform * (orig_x, orig_y)
+                if transformer:
+                    lon, lat = transformer.transform(xc, yc)
+                else:
+                    lon, lat = xc, yc
+                seg_pixels.append({
+                    "lat": float(lat), "lon": float(lon),
+                    "class_id": c_id,
+                    "class_name": CLASS_NAMES.get(c_id, "Unknown")
+                })
         
         # Class statistics
         unique, counts = np.unique(class_map, return_counts=True)
@@ -207,25 +210,27 @@ async def get_segmentation_map(request: PatchInferenceRequest):
         H, W = class_map.shape
         pixels = []
         
-        # Subsample if too large to avoid sending millions of points.
-        # At 10m res, a 512x512 patch = 262k pixels. Sample every Nth pixel.
-        step = max(1, (H * W) // 20000)
+        # Subsample uniformly via 2D grid to avoid vertical line artifacts
+        import math
+        target_pts = 20000
+        total_pts = H * W
+        stride = max(1, int(math.sqrt(total_pts / target_pts)))
         
-        for flat_idx in range(0, H * W, step):
-            y = flat_idx // W
-            x = flat_idx % W
-            c_id = int(class_map[y, x])
-            c_name = CLASS_NAMES.get(c_id, "Unknown")
-            
-            lon = float(lon_min + (x / W) * (lon_max - lon_min))
-            lat = float(lat_max - (y / H) * (lat_max - lat_min))
-            
-            pixels.append({
-                "lat": lat,
-                "lon": lon,
-                "class_id": c_id,
-                "class_name": c_name
-            })
+        pixels = []
+        for y in range(0, H, stride):
+            for x in range(0, W, stride):
+                c_id = int(class_map[y, x])
+                c_name = CLASS_NAMES.get(c_id, "Unknown")
+                
+                lon = float(lon_min + (x / W) * (lon_max - lon_min))
+                lat = float(lat_max - (y / H) * (lat_max - lat_min))
+                
+                pixels.append({
+                    "lat": lat,
+                    "lon": lon,
+                    "class_id": c_id,
+                    "class_name": c_name
+                })
         
         # Build class statistics
         unique, counts = np.unique(class_map, return_counts=True)

@@ -263,7 +263,7 @@ const Visualization = () => {
       getLineColor: [0, 242, 255, 255],
       lineWidthMinPixels: 2,
       stroked: true,
-      filled: true
+      filled: false
     }),
     showHeatmap && new HeatmapLayer({
       id: 'heatmap-layer',
@@ -304,10 +304,10 @@ const Visualization = () => {
       getPosition: d => [d.lon, d.lat],
       getFillColor: d => {
         const entry = CLASS_COLORS[d.class_id] || CLASS_COLORS[0];
-        return [...entry.rgb, 220];
+        return [...entry.rgb, 200];
       },
-      getRadius: 5,
-      radiusMinPixels: 1,
+      radiusPixels: 1.5,
+      stroked: false,
       pickable: true,
       updateTriggers: { getFillColor: [segData] }
     })
