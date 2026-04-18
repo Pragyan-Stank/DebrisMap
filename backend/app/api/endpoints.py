@@ -24,18 +24,19 @@ async def upload_image(file: UploadFile = File(...)):
     """
     return {"status": "success", "message": f"File {file.filename} uploaded successfully"}
 
-@router.post("/predict", response_model=PredictionResponse)
+@router.post("/predict")
 async def predict_debris(file: UploadFile = File(...)):
     """
-    Takes an actual uploaded MARIDA `.tif` image, runs physical U-Net inference,
-    extracts the geographical CRS, and isolates specific debris latitude and longitudes.
+    Takes an actual uploaded MARIDA `.tif` image, runs:
+    1. U-Net + FDI debris detection (returns points above threshold)
+    2. Full pixel-level segmentation (class_map for all pixels)
+    Returns both for visualization.
     """
     global live_hotspots
     
     if not file.filename.endswith(('.tif', '.tiff')):
-        raise HTTPException(status_code=400, detail="Only GeoTIFF files (.tif) are currently supported for geographic extraction.")
+        raise HTTPException(status_code=400, detail="Only GeoTIFF files (.tif) are currently supported.")
     
-    # Safely save the file locally for parsing
     os.makedirs("data/uploads", exist_ok=True)
     temp_path = f"data/uploads/{file.filename}"
     
@@ -43,33 +44,85 @@ async def predict_debris(file: UploadFile = File(...)):
         buffer.write(await file.read())
         
     try:
-        # Load the actual image array natively
+        from app.models.inference import get_inferencer, CLASS_NAMES
+        import torch
+        import torch.nn.functional as TF
+        
         with rasterio.open(temp_path) as src:
             image_data = src.read().astype(np.float32)
-            
-            # The model requires strictly 11 bands!
+            orig_H, orig_W = src.height, src.width
+            transform = src.transform
+            crs = src.crs
             if image_data.shape[0] > 11:
                 image_data = image_data[:11, :, :]
         
-        # Execute the true mathematical pipeline over the physical file properties
+        # ── 1. Debris detection pipeline ──────────────────────
         results = run_marine_debris_pipeline(image_data, tif_path=temp_path)
-        live_hotspots = results  # Update the dashboard polling state!
-        
-        # Compute clusters for the response
+        live_hotspots = results
         clusters = compute_clusters(results)
-        
-        # Record in detection history for Clean-Up Programme
         record_detections(results, clusters, source="upload", metadata={"filename": file.filename})
         
-        return PredictionResponse(
-            status="success",
-            message="Real Inference completed successfully.",
-            points=results,
-            clusters=clusters,
-            metadata={"filename": file.filename, "found_hotspots": len(results)}
-        )
+        # ── 2. Full pixel segmentation ────────────────────────
+        inferencer = get_inferencer()
+        TARGET = 256
+        if orig_H != TARGET or orig_W != TARGET:
+            t = torch.from_numpy(image_data).unsqueeze(0)
+            t = TF.interpolate(t, size=(TARGET, TARGET), mode='bilinear', align_corners=False)
+            img_resized = t.squeeze(0).numpy()
+        else:
+            img_resized = image_data
+            
+        pred = inferencer.predict(img_resized)
+        class_map = pred["class_map"] if isinstance(pred, dict) else np.zeros((TARGET, TARGET), dtype=np.int32)
+        
+        H, W = class_map.shape
+        
+        # Build geo-coordinate transformer
+        transformer = None
+        if crs and crs.to_epsg() != 4326:
+            from pyproj import Transformer as ProjTransformer
+            transformer = ProjTransformer.from_crs(crs, "EPSG:4326", always_xy=True)
+        
+        # Sample pixels (cap at 15000 for payload size)
+        step = max(1, (H * W) // 15000)
+        seg_pixels = []
+        for flat_idx in range(0, H * W, step):
+            y = flat_idx // W
+            x = flat_idx % W
+            c_id = int(class_map[y, x])
+            # Scale to original raster size for geo lookup
+            orig_x = int(x / W * orig_W)
+            orig_y = int(y / H * orig_H)
+            xc, yc = transform * (orig_x, orig_y)
+            if transformer:
+                lon, lat = transformer.transform(xc, yc)
+            else:
+                lon, lat = xc, yc
+            seg_pixels.append({
+                "lat": float(lat), "lon": float(lon),
+                "class_id": c_id,
+                "class_name": CLASS_NAMES.get(c_id, "Unknown")
+            })
+        
+        # Class statistics
+        unique, counts = np.unique(class_map, return_counts=True)
+        class_stats = sorted([
+            {"class_id": int(u), "class_name": CLASS_NAMES.get(int(u), "Unknown"),
+             "pixel_count": int(c), "pct": round(float(c) / (H * W) * 100, 2)}
+            for u, c in zip(unique, counts)
+        ], key=lambda x: -x["pixel_count"])
+        
+        return {
+            "status": "success",
+            "message": f"Inference complete. {len(results)} debris detections.",
+            "points": results,
+            "clusters": clusters,
+            "seg_pixels": seg_pixels,
+            "class_stats": class_stats,
+            "metadata": {"filename": file.filename, "found_hotspots": len(results)}
+        }
     except Exception as e:
-        print(f"Inference error: {e}")
+        import traceback; traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -82,12 +135,21 @@ async def live_patch_inference(request: PatchInferenceRequest):
     """
     global live_hotspots
     try:
-        # Scale the resolution dynamically (10km is ~512 optical grid constraint)
-        size_mapping = {2: 128, 5: 256, 10: 512}  
-        resolution = size_mapping.get(request.resolution, 256)
+        import math
+        lon_min, lat_min, lon_max, lat_max = request.bbox
+        width_km = abs(lon_max - lon_min) * 111.32 * math.cos(abs(lat_min + lat_max) / 2 * math.pi / 180)
+        height_km = abs(lat_max - lat_min) * 111.32
+        
+        # Enforce exact 10m resolution mapping (100 pixels per km)
+        width_px = int(width_km * 100)
+        height_px = int(height_km * 100)
+        
+        # Clamp to multiple of 16 (for LightUNet poolings) between 32 and 1024 to avoid crashes on huge/tiny areas
+        width_px = max(64, min(1024, (width_px // 16) * 16))
+        height_px = max(64, min(1024, (height_px // 16) * 16))
         
         # 1. Fetch satellite swath dynamically across chosen Bounds
-        img_data = fetch_sentinel2_patch(request.bbox, max_size=resolution, date_range=request.date_range)
+        img_data = fetch_sentinel2_patch(request.bbox, size=(width_px, height_px), date_range=request.date_range)
         
         # 2. Execute inference and remap to geo-coordinates perfectly
         points = process_live_patch(img_data, request.bbox)
@@ -108,6 +170,87 @@ async def live_patch_inference(request: PatchInferenceRequest):
         )
     except Exception as e:
         print(f"Patch inference error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/segmentation-map")
+async def get_segmentation_map(request: PatchInferenceRequest):
+    """
+    Runs full U-Net pixel-level segmentation over a bbox.
+    Returns EVERY pixel with its predicted class (not just Marine Debris above a threshold).
+    Used for the pixel-level segmentation overlay in the Analyst tab.
+    """
+    try:
+        import math
+        from app.models.inference import get_inferencer, CLASS_NAMES
+        
+        lon_min, lat_min, lon_max, lat_max = request.bbox
+        width_km = abs(lon_max - lon_min) * 111.32 * math.cos(abs(lat_min + lat_max) / 2 * math.pi / 180)
+        height_km = abs(lat_max - lat_min) * 111.32
+        
+        width_px = max(64, min(512, (int(width_km * 100) // 16) * 16))
+        height_px = max(64, min(512, (int(height_km * 100) // 16) * 16))
+        
+        print(f"[SEG-MAP] bbox={request.bbox}, size=({width_px},{height_px})")
+        
+        img_data = fetch_sentinel2_patch(request.bbox, size=(width_px, height_px), date_range=request.date_range)
+        
+        inferencer = get_inferencer()
+        result = inferencer.predict(img_data)
+        
+        if isinstance(result, dict):
+            class_map = result["class_map"]   # (H, W) int array of class IDs 0-15
+        else:
+            # Fallback: all debris
+            class_map = np.ones((img_data.shape[1], img_data.shape[2]), dtype=np.int32)
+        
+        H, W = class_map.shape
+        pixels = []
+        
+        # Subsample if too large to avoid sending millions of points.
+        # At 10m res, a 512x512 patch = 262k pixels. Sample every Nth pixel.
+        step = max(1, (H * W) // 20000)
+        
+        for flat_idx in range(0, H * W, step):
+            y = flat_idx // W
+            x = flat_idx % W
+            c_id = int(class_map[y, x])
+            c_name = CLASS_NAMES.get(c_id, "Unknown")
+            
+            lon = float(lon_min + (x / W) * (lon_max - lon_min))
+            lat = float(lat_max - (y / H) * (lat_max - lat_min))
+            
+            pixels.append({
+                "lat": lat,
+                "lon": lon,
+                "class_id": c_id,
+                "class_name": c_name
+            })
+        
+        # Build class statistics
+        unique, counts = np.unique(class_map, return_counts=True)
+        class_stats = [
+            {
+                "class_id": int(uid),
+                "class_name": CLASS_NAMES.get(int(uid), "Unknown"),
+                "pixel_count": int(cnt),
+                "pct": round(float(cnt) / (H * W) * 100, 2)
+            }
+            for uid, cnt in zip(unique, counts)
+        ]
+        class_stats.sort(key=lambda x: x["pixel_count"], reverse=True)
+        
+        return {
+            "status": "success",
+            "width": W,
+            "height": H,
+            "pixels": pixels,
+            "class_stats": class_stats,
+            "bbox": request.bbox
+        }
+    except Exception as e:
+        import traceback
+        print(f"[SEG-MAP] Error: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/visualization-data", response_model=PredictionResponse)

@@ -5,9 +5,34 @@ import { ScatterplotLayer, PolygonLayer } from '@deck.gl/layers';
 import { HeatmapLayer } from '@deck.gl/aggregation-layers';
 import { Map } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { getVisualizationData, predictDebris, fetchPatchInference } from '../services/api';
-import { Upload, Target, Activity, Download, Clock, BarChart3, MapPin, AlertTriangle, Crosshair, Trash2, Eye, EyeOff, Radio } from 'lucide-react';
+import { getVisualizationData, predictDebris, fetchPatchInference, fetchSegmentationMap } from '../services/api';
+import { Upload, Target, Activity, Download, Clock, BarChart3, MapPin, AlertTriangle, Crosshair, Trash2, Eye, EyeOff, Radio, Layers } from 'lucide-react';
 import TerminalLoader from '../components/TerminalLoader';
+
+// All 16 MARIDA U-Net class colors
+const CLASS_COLORS = {
+  0:  { name: "Unlabeled",       rgb: [100, 116, 139] },
+  1:  { name: "Marine Debris",   rgb: [0,   242, 255] },
+  2:  { name: "Dense Sargassum",  rgb: [16,  185, 129] },
+  3:  { name: "Sparse Sargassum", rgb: [52,  211, 153] },
+  4:  { name: "Natural Organic",  rgb: [139,  92, 246] },
+  5:  { name: "Ship",             rgb: [245, 158,  11] },
+  6:  { name: "Clouds",           rgb: [226, 232, 240] },
+  7:  { name: "Marine Water",     rgb: [30,   64, 175] },
+  8:  { name: "Sediment Water",   rgb: [180, 135,  54] },
+  9:  { name: "Foam",             rgb: [248, 250, 252] },
+  10: { name: "Turbid Water",     rgb: [107, 114,  28] },
+  11: { name: "Shallow Water",    rgb: [56,  189, 248] },
+  12: { name: "Waves",            rgb: [99,  102, 241] },
+  13: { name: "Cloud Shadows",    rgb: [71,   85, 105] },
+  14: { name: "Wakes",            rgb: [251, 191, 146] },
+  15: { name: "Mixed Water",      rgb: [14,  165, 233] },
+};
+
+// Legacy name->color for debris detection tab
+const DEBRIS_COLORS_BY_NAME = Object.fromEntries(
+  Object.values(CLASS_COLORS).map(({ name, rgb }) => [name, rgb])
+);
 
 const INITIAL_VIEW_STATE = {
   longitude: -86.33591,
@@ -49,6 +74,10 @@ const Visualization = () => {
   const [showPoints, setShowPoints] = useState(true);
   const [showClusters, setShowClusters] = useState(true);
   const [hoveredPoint, setHoveredPoint] = useState(null);
+  const [segMode, setSegMode] = useState(false);
+  const [segData, setSegData] = useState([]);
+  const [segStats, setSegStats] = useState([]);
+  const [segLoading, setSegLoading] = useState(false);
 
   // Computed analytics
   const analytics = useMemo(() => {
@@ -91,6 +120,9 @@ const Visualization = () => {
     if (result && result.points !== undefined) {
        setData(result.points);
        setClusters(result.clusters || []);
+       setSegMode(false); // switch back to detection view
+       setSegData([]);
+       setSegStats([]);
        
        // Log to scan history
        setScanHistory(prev => [{
@@ -113,6 +145,36 @@ const Visualization = () => {
        }));
     } else {
        alert("Failed to connect to Sentinel Hub or inference backend.");
+    }
+  };
+
+  const handleRunSegmentation = async () => {
+    if (!draftBBox) {
+      alert("Please draw a target region on the map first!");
+      return;
+    }
+    setSegLoading(true);
+    const lonMin = Math.min(draftBBox.start[0], draftBBox.end[0]);
+    const lonMax = Math.max(draftBBox.start[0], draftBBox.end[0]);
+    const latMin = Math.min(draftBBox.start[1], draftBBox.end[1]);
+    const latMax = Math.max(draftBBox.start[1], draftBBox.end[1]);
+    const bbox = [lonMin, latMin, lonMax, latMax];
+    const centerLon = (lonMin + lonMax) / 2;
+    const centerLat = (latMin + latMax) / 2;
+    
+    const result = await fetchSegmentationMap(bbox, dateRange);
+    setSegLoading(false);
+    
+    if (result && result.pixels) {
+      setSegData(result.pixels);
+      setSegStats(result.class_stats || []);
+      setSegMode(true);
+      setViewState(v => ({
+        ...v, longitude: centerLon, latitude: centerLat, zoom: 14,
+        transitionDuration: 2000, transitionInterpolator: new FlyToInterpolator()
+      }));
+    } else {
+      alert("Segmentation failed. Check backend logs.");
     }
   };
 
@@ -149,6 +211,18 @@ const Visualization = () => {
            transitionDuration: 3000,
            transitionInterpolator: new FlyToInterpolator()
          }));
+      } else if (result.seg_pixels && result.seg_pixels.length > 0) {
+        // Fly to centroid of segmentation even if no explicit debris detected
+        const cLat = result.seg_pixels.reduce((s, p) => s + p.lat, 0) / result.seg_pixels.length;
+        const cLon = result.seg_pixels.reduce((s, p) => s + p.lon, 0) / result.seg_pixels.length;
+        setViewState(v => ({ ...v, longitude: cLon, latitude: cLat, zoom: 13, transitionDuration: 2000, transitionInterpolator: new FlyToInterpolator() }));
+      }
+      
+      // Auto-load segmentation overlay from the upload result
+      if (result.seg_pixels && result.seg_pixels.length > 0) {
+        setSegData(result.seg_pixels);
+        setSegStats(result.class_stats || []);
+        setSegMode(true);
       }
     }
   };
@@ -204,9 +278,12 @@ const Visualization = () => {
       id: 'scatterplot-layer',
       data,
       getPosition: d => [d.lon, d.lat],
-      getFillColor: [0, 242, 255, 200],
-      getRadius: 30,
-      radiusMinPixels: 3,
+      getFillColor: d => {
+        const entry = DEBRIS_COLORS_BY_NAME[d.class_name];
+        return entry ? [...entry, 230] : [0, 242, 255, 230];
+      },
+      getRadius: 7,
+      radiusMinPixels: 1,
       pickable: true,
       onHover: info => setHoveredPoint(info.object || null),
     }),
@@ -219,6 +296,20 @@ const Visualization = () => {
       lineWidthMinPixels: 2,
       stroked: true,
       getRadius: d => Math.max(100, d.density * 5),
+    }),
+    // Full pixel-level segmentation overlay from best_model.pth
+    segMode && segData.length > 0 && new ScatterplotLayer({
+      id: 'segmentation-layer',
+      data: segData,
+      getPosition: d => [d.lon, d.lat],
+      getFillColor: d => {
+        const entry = CLASS_COLORS[d.class_id] || CLASS_COLORS[0];
+        return [...entry.rgb, 220];
+      },
+      getRadius: 5,
+      radiusMinPixels: 1,
+      pickable: true,
+      updateTriggers: { getFillColor: [segData] }
     })
   ].filter(Boolean);
 
@@ -305,16 +396,66 @@ const Visualization = () => {
                                 </select>
                             </div>
                             <button className="btn btn-glow" onClick={handleRunPatchInference} style={{width: '100%', justifyContent: 'center'}}>
-                                Execute Neural Scan
-                            </button>
-                            <button className="btn glass" onClick={() => {setDraftBBox(null); setData([]); setClusters([]);}} style={{width:'100%',justifyContent:'center',marginTop:'8px',borderColor:'rgba(255,255,255,0.1)', color:'#94a3b8', fontSize:'0.8rem'}}>
-                                <Trash2 size={14}/> Clear Selection
-                            </button>
+                        Execute Neural Scan
+                    </button>
+                    <button className="btn" onClick={handleRunSegmentation}
+                      style={{ width: '100%', justifyContent: 'center', marginTop: '8px', background: 'linear-gradient(135deg, #7c3aed, #a855f7)', border: 'none', color: '#fff' }}>
+                        <Layers size={14} /> Run Pixel Segmentation
+                    </button>
+                    <button className="btn glass" onClick={() => {setDraftBBox(null); setData([]); setClusters([]); setSegData([]); setSegStats([]); setSegMode(false);}} style={{width:'100%',justifyContent:'center',marginTop:'8px',borderColor:'rgba(255,255,255,0.1)', color:'#94a3b8', fontSize:'0.8rem'}}>
+                        <Trash2 size={14}/> Clear Selection
+                    </button>
                         </>
                     )}
                 </div>
             )}
         </div>
+
+        {/* ── Segmentation Loading ── */}
+        {segLoading && (
+          <div className="control-card" style={{ borderColor: 'rgba(139,94,254,0.4)' }}>
+            <div className="card-title" style={{ color: '#a855f7' }}><Layers size={16}/> Pixel Segmentation</div>
+            <TerminalLoader mode="visualization" height="150px" />
+          </div>
+        )}
+
+        {/* ── Segmentation Class Stats ── */}
+        {segMode && segStats.length > 0 && (
+          <div className="control-card" style={{ borderColor: 'rgba(139,94,254,0.4)' }}>
+            <div className="card-title" style={{ color: '#a855f7' }}><Layers size={16}/> Pixel Segmentation Map</div>
+            <div style={{ fontSize: '0.65rem', color: '#64748b', marginBottom: '10px' }}>
+              {segData.length.toLocaleString()} sampled pixels · best_model.pth
+            </div>
+
+            {/* Proportional legend bar */}
+            <div style={{ display: 'flex', height: '8px', borderRadius: '4px', overflow: 'hidden', marginBottom: '12px' }}>
+              {segStats.map(s => (
+                <div key={s.class_id} title={`${s.class_name} ${s.pct}%`}
+                  style={{ flex: s.pct, background: `rgb(${(CLASS_COLORS[s.class_id] || CLASS_COLORS[0]).rgb.join(',')})` }} />
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', maxHeight: '280px', overflowY: 'auto' }}>
+              {segStats.map(s => {
+                const color = (CLASS_COLORS[s.class_id] || CLASS_COLORS[0]).rgb;
+                const hex = `rgb(${color.join(',')})`;
+                return (
+                  <div key={s.class_id} style={{ display: 'grid', gridTemplateColumns: '10px 1fr auto auto', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ width: '10px', height: '10px', borderRadius: '2px', background: hex, display: 'inline-block', flexShrink: 0, boxShadow: `0 0 4px ${hex}` }}></span>
+                    <span style={{ fontSize: '0.68rem', color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.class_name}</span>
+                    <span style={{ fontSize: '0.62rem', color: '#64748b', fontFamily: 'monospace' }}>{s.pixel_count.toLocaleString()}</span>
+                    <span style={{ fontSize: '0.65rem', color: hex, fontWeight: 700, minWidth: '36px', textAlign: 'right' }}>{s.pct}%</span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <button className="btn glass" onClick={() => { setSegMode(false); setSegData([]); setSegStats([]); }}
+              style={{width:'100%',justifyContent:'center',marginTop:'10px',borderColor:'rgba(139,94,254,0.3)', color:'#a855f7', fontSize:'0.75rem'}}>
+              Clear Segmentation
+            </button>
+          </div>
+        )}
 
         {/* Upload Card */}
         <div className="control-card">
@@ -358,6 +499,33 @@ const Visualization = () => {
             </div>
             <div style={{marginTop:'10px',fontSize:'0.7rem',color:'#64748b'}}>Confidence Distribution</div>
             <ConfidenceChart />
+
+            {data.some(d => d.class_name) && (
+              <div style={{ marginTop: '15px' }}>
+                <div style={{fontSize:'0.7rem',color:'#64748b',marginBottom:'6px'}}>Spectral Segmentation Overview</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', background: '#0a1016', padding: '8px', borderRadius: '8px' }}>
+                  {Object.entries(
+                      data.reduce((acc, d) => {
+                        const name = d.class_name || "Marine Debris";
+                        acc[name] = (acc[name] || 0) + 1;
+                        return acc;
+                      }, {})
+                    ).sort((a,b) => b[1] - a[1]).map(([className, count]) => {
+                      const colorArr = DEBRIS_COLORS_BY_NAME[className] || [148, 163, 184];
+                      const hexColor = `rgb(${colorArr[0]}, ${colorArr[1]}, ${colorArr[2]})`;
+                      return (
+                      <div key={className} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: hexColor, boxShadow: `0 0 5px ${hexColor}` }}></span>
+                          <span style={{ fontSize: '0.7rem', color: '#e2e8f0' }}>{className}</span>
+                        </div>
+                        <span style={{ fontSize: '0.7rem', color: '#94a3b8', fontFamily: 'monospace' }}>{count} px</span>
+                      </div>
+                    )})}
+                </div>
+              </div>
+            )}
+
             <button className="btn glass" onClick={handleExportCSV} style={{width:'100%',justifyContent:'center',marginTop:'12px',borderColor:'rgba(255,255,255,0.1)',fontSize:'0.8rem'}}>
               <Download size={14}/> Export as CSV
             </button>

@@ -43,6 +43,20 @@ export const fetchPatchInference = async (bbox, resolution, dateRange) => {
   }
 };
 
+export const fetchSegmentationMap = async (bbox, dateRange) => {
+  try {
+    const response = await axios.post(`${API_URL}/segmentation-map`, {
+      bbox,
+      resolution: 10,
+      date_range: dateRange
+    });
+    return response.data;
+  } catch (error) {
+    console.error("Error fetching segmentation map:", error);
+    return null;
+  }
+};
+
 export const predictTrajectory = async (lat, lon, label = "MANUAL", nPixels = 100, confidence = 0.8) => {
   try {
     const response = await axios.post(`${API_URL}/trajectory/predict`, {
