@@ -4,11 +4,12 @@ import numpy as np
 import os
 import rasterio
 
-from app.schemas.predict import PredictionResponse, PatchInferenceRequest
+from app.schemas.predict import PredictionResponse, PatchInferenceRequest, TrajectoryRequest, TrajectoryFromClustersRequest
 from app.models.inference import run_marine_debris_pipeline
 from app.services.sentinel_service import fetch_sentinel2_patch
 from app.services.patch_inference_service import process_live_patch
 from app.services.clustering_service import compute_clusters
+from app.services.trajectory_service import predict_trajectory_for_point, predict_trajectories_for_clusters
 
 router = APIRouter()
 
@@ -53,10 +54,14 @@ async def predict_debris(file: UploadFile = File(...)):
         results = run_marine_debris_pipeline(image_data, tif_path=temp_path)
         live_hotspots = results  # Update the dashboard polling state!
         
+        # Compute clusters for the response
+        clusters = compute_clusters(results)
+        
         return PredictionResponse(
             status="success",
             message="Real Inference completed successfully.",
             points=results,
+            clusters=clusters,
             metadata={"filename": file.filename, "found_hotspots": len(results)}
         )
     except Exception as e:
@@ -78,7 +83,7 @@ async def live_patch_inference(request: PatchInferenceRequest):
         resolution = size_mapping.get(request.resolution, 256)
         
         # 1. Fetch satellite swath dynamically across chosen Bounds
-        img_data = fetch_sentinel2_patch(request.bbox, max_size=resolution)
+        img_data = fetch_sentinel2_patch(request.bbox, max_size=resolution, date_range=request.date_range)
         
         # 2. Execute inference and remap to geo-coordinates perfectly
         points = process_live_patch(img_data, request.bbox)
@@ -108,3 +113,59 @@ async def get_visualization_data():
         message="Live visualization data fetched.",
         points=live_hotspots
     )
+
+
+# ─── Trajectory Prediction Endpoints ──────────────────────────────────
+
+@router.post("/trajectory/predict")
+async def predict_single_trajectory(request: TrajectoryRequest):
+    """
+    Predict 72h drift trajectory for a single coordinate.
+    Uses Leeway physics model + live Open-Meteo wind + Monte Carlo uncertainty.
+    """
+    try:
+        result = predict_trajectory_for_point(
+            lat=request.lat,
+            lon=request.lon,
+            label=request.label,
+            n_pixels=request.n_pixels,
+            confidence=request.confidence,
+        )
+        return {"status": "success", "hotspot": result}
+    except Exception as e:
+        print(f"Trajectory prediction error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/trajectory/from-clusters")
+async def predict_cluster_trajectories(request: TrajectoryFromClustersRequest):
+    """
+    Predict 72h trajectories for multiple debris clusters (from scan or upload).
+    """
+    try:
+        hotspots = predict_trajectories_for_clusters(request.clusters, source=request.source)
+        return {
+            "status": "success",
+            "hotspots": hotspots,
+            "summary": {
+                "total_clusters": len(hotspots),
+                "critical": sum(1 for h in hotspots if h["risk"] == "CRITICAL"),
+                "high": sum(1 for h in hotspots if h["risk"] == "HIGH"),
+                "medium": sum(1 for h in hotspots if h["risk"] == "MEDIUM"),
+                "low": sum(1 for h in hotspots if h["risk"] == "LOW"),
+            }
+        }
+    except Exception as e:
+        print(f"Cluster trajectory error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/weather")
+async def get_weather(lat: float, lon: float):
+    """Fetch real-time marine weather for a coordinate."""
+    from app.services.weather_service import fetch_marine_weather
+    try:
+        return fetch_marine_weather(lat, lon)
+    except Exception as e:
+        print(f"Weather fetch error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

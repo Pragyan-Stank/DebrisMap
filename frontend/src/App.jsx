@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Home from './pages/Home';
 import Visualization from './pages/Visualization';
+import Trajectory from './pages/Trajectory';
 
 function App() {
   return (
@@ -13,6 +14,7 @@ function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/visualization" element={<Visualization />} />
+            <Route path="/trajectory" element={<Trajectory />} />
           </Routes>
         </main>
       </div>

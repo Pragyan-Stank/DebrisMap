@@ -42,3 +42,37 @@ export const fetchPatchInference = async (bbox, resolution, dateRange) => {
     return null;
   }
 };
+
+export const predictTrajectory = async (lat, lon, label = "MANUAL", nPixels = 100, confidence = 0.8) => {
+  try {
+    const response = await axios.post(`${API_URL}/trajectory/predict`, {
+      lat, lon, label, n_pixels: nPixels, confidence
+    });
+    return response.data;
+  } catch (error) {
+    console.error("Error predicting trajectory:", error);
+    return null;
+  }
+};
+
+export const predictClusterTrajectories = async (clusters, source = "detection") => {
+  try {
+    const response = await axios.post(`${API_URL}/trajectory/from-clusters`, {
+      clusters, source
+    });
+    return response.data;
+  } catch (error) {
+    console.error("Error predicting cluster trajectories:", error);
+    return null;
+  }
+};
+
+export const fetchWeather = async (lat, lon) => {
+  try {
+    const response = await axios.get(`${API_URL}/weather`, { params: { lat, lon } });
+    return response.data;
+  } catch (error) {
+    console.error("Error fetching weather:", error);
+    return null;
+  }
+};

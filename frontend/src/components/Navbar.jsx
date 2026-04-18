@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Waves, BarChart2 } from 'lucide-react';
+import { Waves, BarChart2, Navigation } from 'lucide-react';
 
 const Navbar = () => {
   const [scrolled, setScrolled] = useState(false);
@@ -14,10 +14,10 @@ const Navbar = () => {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  const isVisPage = location.pathname === '/visualization';
+  const isSubPage = location.pathname !== '/';
 
   return (
-    <nav className={`navbar ${scrolled || isVisPage ? 'glass' : ''}`}>
+    <nav className={`navbar ${scrolled || isSubPage ? 'glass' : ''}`}>
       <Link to="/" className="nav-brand">
         <Waves size={24} color="#00f2ff" />
         <span>OceanEye AI</span>
@@ -26,10 +26,16 @@ const Navbar = () => {
         <Link to="/" className={`nav-link ${location.pathname === '/' ? 'active' : ''}`}>
           Mission
         </Link>
-        <Link to="/visualization" className={`nav-link ${isVisPage ? 'active' : ''}`}>
+        <Link to="/visualization" className={`nav-link ${location.pathname === '/visualization' ? 'active' : ''}`}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <BarChart2 size={16} />
             Analytics Hub
+          </div>
+        </Link>
+        <Link to="/trajectory" className={`nav-link ${location.pathname === '/trajectory' ? 'active' : ''}`}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Navigation size={16} />
+            Drift Forecast
           </div>
         </Link>
       </div>
