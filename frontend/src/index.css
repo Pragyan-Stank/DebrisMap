@@ -24,6 +24,15 @@
 
 html { scroll-behavior: smooth; }
 
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
 body {
   background-color: var(--bg-dark);
   color: var(--text-main);

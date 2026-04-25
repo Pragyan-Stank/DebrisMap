@@ -14,6 +14,11 @@ from app.services.detection_store import record_detections, get_history_summary
 
 router = APIRouter()
 
+# ─────────────────────────────────────────────────────────────────────────────
+# NOTE: The global `live_hotspots` below acts as an in-memory cache for
+# the most recent prediction batch. Full history lives in detection_store.
+# ─────────────────────────────────────────────────────────────────────────────
+
 # Global memory to act as a mock database for the dashboard's live-polling feature
 live_hotspots = []
 
@@ -405,14 +410,15 @@ async def get_persistent_zones(hours: float = 168):
 async def get_optimal_route(vessel_lat: float, vessel_lon: float, hours: float = 72):
     """
     Computes optimal greedy route to visit all active cleanup zones.
+    Uses debris drift trajectories for true intercept-based routing.
     """
     from app.services.cleanup_service import build_cleanup_intelligence
     from app.services.coastguard_service import compute_optimal_route
     intel = build_cleanup_intelligence(max_age_hours=hours)
-    
+
     if not intel.get("clusters"):
         return {"status": "empty", "route": [], "total_distance_km": 0}
-        
+
     result = compute_optimal_route(intel["clusters"], vessel_lat, vessel_lon)
     return {
         "status": "success",
@@ -420,3 +426,110 @@ async def get_optimal_route(vessel_lat: float, vessel_lon: float, hours: float =
         "total_distance_km": result["total_distance_km"],
         "vessel_origin": {"lat": vessel_lat, "lon": vessel_lon}
     }
+
+
+# ─── Seed / Demo Data Endpoint ─────────────────────────────────────────────
+
+@router.post("/seed-demo-data")
+async def seed_demo_data(clear_existing: bool = False):
+    """
+    Populates the detection store with realistic synthetic debris detection history
+    spanning 7 days across Caribbean hotspots, enabling all Clean-Up Programme
+    features (Zones, Dispatch, Intercept, Route, Persist) to work immediately.
+    """
+    try:
+        from app.services.seed_service import seed_demo_data as _seed
+        result = _seed(clear_existing=clear_existing)
+        return result
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── AI Agent Endpoints ────────────────────────────────────────────────────
+
+@router.post("/ai-dispatch")
+async def ai_dispatch_analysis(hours: float = 72):
+    """
+    LLM-powered operational briefing for the current dispatch plan.
+    Uses ChatGroq (LLaMA3-70B) to analyze zones and generate a
+    structured threat assessment + prioritization narrative.
+    """
+    from app.services.cleanup_service import build_cleanup_intelligence
+    from app.services.coastguard_service import generate_dispatch_plan
+    from app.services.ai_agent_service import analyze_dispatch_with_ai
+
+    try:
+        intel = build_cleanup_intelligence(max_age_hours=hours)
+        if not intel.get("clusters"):
+            return {"status": "empty", "message": "No zones available. Run a scan or seed demo data first."}
+
+        dispatches = generate_dispatch_plan(intel["clusters"])
+        ai_result = analyze_dispatch_with_ai(intel["clusters"], dispatches, intel["summary"])
+        return {
+            "status": "success",
+            "dispatches": dispatches,
+            "summary": intel["summary"],
+            "ai_analysis": ai_result,
+        }
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/ai-persistent-analysis")
+async def ai_persistent_analysis(hours: float = 168):
+    """
+    AI-powered analysis of persistent debris zones.
+    Provides ecosystem risk assessment and long-term recommendations.
+    """
+    from app.services.coastguard_service import detect_persistent_zones
+    from app.services.ai_agent_service import analyze_persistent_zones_with_ai
+
+    try:
+        zones = detect_persistent_zones(max_age_hours=hours)
+        if not zones:
+            return {"status": "empty", "message": "No persistent zones detected."}
+        ai_result = analyze_persistent_zones_with_ai(zones)
+        return {"status": "success", "zones": zones, "ai_analysis": ai_result}
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/ai-intercept-analysis")
+async def ai_intercept_analysis(
+    debris_lat: float, debris_lon: float,
+    vessel_lat: float, vessel_lon: float,
+    vessel_speed_knots: float = 22
+):
+    """
+    AI-enhanced intercept plan with tactical narrative from ChatGroq.
+    Extends the standard /intercept-plan with LLM reasoning.
+    """
+    from app.services.coastguard_service import compute_intercept
+    from app.services.ai_agent_service import analyze_intercept_with_ai
+
+    try:
+        hotspot = predict_trajectory_for_point(debris_lat, debris_lon, label="AI-INTERCEPT")
+        intercept = compute_intercept(
+            hotspot["trajectory"], vessel_lat, vessel_lon, vessel_speed_knots
+        )
+        ai_result = analyze_intercept_with_ai(
+            debris_origin={"lat": debris_lat, "lon": debris_lon},
+            vessel_origin={"lat": vessel_lat, "lon": vessel_lon},
+            intercept_point=intercept,
+            trajectory=hotspot["trajectory"],
+            vessel_speed=vessel_speed_knots,
+        )
+        return {
+            "status": "success",
+            "debris_origin": {"lat": debris_lat, "lon": debris_lon},
+            "vessel_origin": {"lat": vessel_lat, "lon": vessel_lon},
+            "intercept": intercept,
+            "trajectory": hotspot["trajectory"],
+            "ai_analysis": ai_result,
+        }
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))

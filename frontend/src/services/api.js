@@ -174,3 +174,55 @@ export const fetchOptimalRoute = async (vesselLat, vesselLon, hours = 72) => {
     return null;
   }
 };
+
+export const seedDemoData = async (clearExisting = false) => {
+  try {
+    const response = await axios.post(`${API_URL}/seed-demo-data`, null, {
+      params: { clear_existing: clearExisting }
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error seeding demo data:', error);
+    return null;
+  }
+};
+
+export const fetchAIDispatch = async (hours = 72) => {
+  try {
+    const response = await axios.post(`${API_URL}/ai-dispatch`, null, {
+      params: { hours }
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching AI dispatch:', error);
+    return null;
+  }
+};
+
+export const fetchAIPersistentAnalysis = async (hours = 168) => {
+  try {
+    const response = await axios.post(`${API_URL}/ai-persistent-analysis`, null, {
+      params: { hours }
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching AI persistent analysis:', error);
+    return null;
+  }
+};
+
+export const fetchAIInterceptAnalysis = async (debrisLat, debrisLon, vesselLat, vesselLon, speedKnots = 22) => {
+  try {
+    const response = await axios.post(`${API_URL}/ai-intercept-analysis`, null, {
+      params: {
+        debris_lat: debrisLat, debris_lon: debrisLon,
+        vessel_lat: vesselLat, vessel_lon: vesselLon,
+        vessel_speed_knots: speedKnots,
+      }
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching AI intercept analysis:', error);
+    return null;
+  }
+};

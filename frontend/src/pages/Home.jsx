@@ -262,7 +262,7 @@ const Home = () => {
       {/* ── Footer ────────────────────────────────────── */}
       <footer className="footer">
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ color: '#00f2ff', fontWeight: 700 }}>OceanEye AI</span>
+          <span style={{ color: '#00f2ff', fontWeight: 700 }}>JalRakshak</span>
           <span>· 2026</span>
         </div>
         <div style={{ display: 'flex', gap: '16px' }}>

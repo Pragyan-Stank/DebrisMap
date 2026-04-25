@@ -20,7 +20,7 @@ const Navbar = () => {
     <nav className={`navbar ${scrolled || isSubPage ? 'glass' : ''}`}>
       <Link to="/" className="nav-brand">
         <Waves size={24} color="#00f2ff" />
-        <span>OceanEye AI</span>
+        <span>JalRakshak</span>
       </Link>
       <div className="nav-links">
         <Link to="/" className={`nav-link ${location.pathname === '/' ? 'active' : ''}`}>
