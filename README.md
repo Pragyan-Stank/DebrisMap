@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>🌊 OceanEye: Autonomous Detection & Trajectory Mapping of Global Marine Debris</h1>
+  <h1>🌊 JalRakshak: Autonomous Detection & Trajectory Mapping of Global Marine Debris</h1>
   <p>
     An end-to-end fullstack platform for detecting, geolocating, and forecasting marine macroplastic distribution using <b>Sentinel-2 Satellite Imagery</b>, <b>Deep Learning</b>, and <b>Physics-Guided Ocean Modeling</b>.
   </p>
